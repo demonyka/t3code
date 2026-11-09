@@ -3,7 +3,7 @@ name: Build Windows installer
 on:
   push:
     branches:
-      - feat/worktree-sidebar-tree
+      - main
   workflow_dispatch:
 
 permissions:
