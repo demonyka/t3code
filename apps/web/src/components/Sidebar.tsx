@@ -9,6 +9,7 @@ import {
 } from "./chat/threadContextDrag";
 import { discardComposerDraft } from "../lib/discardComposerDraft";
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
+import { requestNewWorktreeName } from "./NewWorktreeDialog";
 import { useAtomValue } from "@effect/atom-react";
 import * as Option from "effect/Option";
 import { Atom } from "effect/reactivity";
@@ -1291,6 +1292,22 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (isMobile) setOpenMobile(false);
     void handleNewThread(scopeProjectRef(group.environmentId, group.id));
   });
+  const startNewWorktreeThread = async (target: {
+    readonly environmentId: EnvironmentId;
+    readonly projectId: ProjectId;
+    readonly cwd: string;
+    readonly baseBranch: string | null;
+  }) => {
+    const choice = await requestNewWorktreeName(target);
+    if (choice === null) return;
+    if (isMobile) setOpenMobile(false);
+    void handleNewThread(scopeProjectRef(target.environmentId, target.projectId), {
+      branch: target.baseBranch,
+      worktreePath: null,
+      envMode: "worktree",
+      newWorktreeBranch: choice.branch,
+    });
+  };
   const startThreadInWorktree = useStableCallback(
     (node: SidebarWorktreeNode<EnvironmentThreadShell>) => {
       if (isMobile) setOpenMobile(false);
@@ -1330,7 +1347,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               { id: "new-thread", label: "New thread here" },
               ...(node.branch === null
                 ? []
-                : [{ id: "new-worktree", label: `New worktree from ${node.branch}` }]),
+                : [{ id: "new-worktree", label: `New worktree from ${node.branch}…` }]),
               { id: "copy-path", label: "Copy path" },
               ...(node.checkoutLabel === null &&
               readEnvironmentScope(node.environmentId, AuthSourceControlWriteScope)
@@ -1346,11 +1363,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             startThreadInWorktree(node);
             return;
           case "new-worktree":
-            if (isMobile) setOpenMobile(false);
-            void handleNewThread(
-              scopeProjectRef(node.environmentId, ProjectId.make(node.projectId)),
-              { branch: node.branch, worktreePath: null, envMode: "worktree" },
-            );
+            void startNewWorktreeThread({
+              environmentId: node.environmentId,
+              projectId: ProjectId.make(node.projectId),
+              cwd: node.path,
+              baseBranch: node.branch,
+            });
             return;
           case "copy-path":
             copyPathToClipboard(node.path, { path: node.path });
@@ -1387,7 +1405,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           api.contextMenu.show(
             [
               { id: "new-thread", label: "New thread" },
-              { id: "new-worktree", label: "New thread in a new worktree" },
+              { id: "new-worktree", label: "New thread in a new worktree…" },
               { id: "copy-path", label: "Copy path" },
               ...(moveOptions.up === null ? [] : [{ id: "move-up", label: "Move up" }]),
               ...(moveOptions.down === null ? [] : [{ id: "move-down", label: "Move down" }]),
@@ -1409,10 +1427,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             startThreadInProjectFolder(group);
             return;
           case "new-worktree":
-            if (isMobile) setOpenMobile(false);
-            void handleNewThread(scopeProjectRef(group.environmentId, group.id), {
-              worktreePath: null,
-              envMode: "worktree",
+            void startNewWorktreeThread({
+              environmentId: group.environmentId,
+              projectId: group.id,
+              cwd: group.workspaceRoot,
+              baseBranch: null,
             });
             return;
           case "copy-path":

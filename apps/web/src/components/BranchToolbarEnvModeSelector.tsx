@@ -35,6 +35,7 @@ interface BranchToolbarEnvModeSelectorProps {
   previousWorktreeLabel?: string | null;
   previousWorktreeBranch?: string | null;
   onUsePreviousWorktree?: () => void;
+  newWorktreeBranch?: string | null;
 }
 
 export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSelector({
@@ -46,6 +47,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
   previousWorktreeLabel,
   previousWorktreeBranch = null,
   onUsePreviousWorktree,
+  newWorktreeBranch = null,
 }: BranchToolbarEnvModeSelectorProps) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const shortcutLabel = shortcutLabelForCommand(
@@ -58,7 +60,12 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
       value: "local",
       label: resolveCurrentWorkspaceLabel(activeWorktreePath),
     },
-    { value: "worktree", label: resolveEnvModeLabel("worktree") },
+    {
+      value: "worktree",
+      label: newWorktreeBranch
+        ? `New worktree: ${newWorktreeBranch}`
+        : resolveEnvModeLabel("worktree"),
+    },
     ...(showPreviousWorktree && previousWorktreeLabel
       ? [{ value: PREVIOUS_WORKTREE_SELECT_VALUE, label: previousWorktreeLabel }]
       : []),

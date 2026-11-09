@@ -1178,6 +1178,7 @@ describe("composerDraftStore project draft thread mapping", () => {
       worktreePath: "/tmp/local-worktree",
       envMode: "worktree",
       startFromOrigin: true,
+      newWorktreeBranch: "feature/named",
     });
 
     store.setLogicalProjectDraftThreadId(scopedProjectKey(projectRef), remoteProjectRef, draftId, {
@@ -1189,6 +1190,7 @@ describe("composerDraftStore project draft thread mapping", () => {
       projectId,
       branch: null,
       worktreePath: null,
+      newWorktreeBranch: null,
       envMode: "worktree",
       startFromOrigin: true,
     });

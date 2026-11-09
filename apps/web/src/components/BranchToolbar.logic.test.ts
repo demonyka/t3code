@@ -2,6 +2,7 @@ import { type VcsRef } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
 import {
+  isValidNewBranchName,
   countBusyThreadsOnCheckout,
   deriveLocalBranchNameFromRemoteRef,
   resolveBranchSelectionTarget,
@@ -156,6 +157,35 @@ describe("dedupeRemoteBranchesWithLocalMatches", () => {
       "upstream/feature",
       "my-org/upstream/feature",
     ]);
+  });
+});
+
+describe("isValidNewBranchName", () => {
+  it.each([
+    ["feat-login", true],
+    ["feat/login-v2", true],
+    ["", false],
+    ["-force", false],
+    ["feat..login", false],
+    ["feat//login", false],
+    ["feat/", false],
+    ["feat.", false],
+    [".hidden", false],
+    ["feat/.hidden", false],
+    ["feat.lock", false],
+    ["feat.lock/more", false],
+    ["feat login", false],
+    ["feat~1", false],
+    ["feat^", false],
+    ["feat:x", false],
+    ["feat?", false],
+    ["feat*", false],
+    ["feat[", false],
+    ["feat\\x", false],
+    ["feat@{1}", false],
+    ["@", false],
+  ])("%j is %s", (name, expected) => {
+    expect(isValidNewBranchName(name)).toBe(expected);
   });
 });
 

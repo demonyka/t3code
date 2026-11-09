@@ -116,6 +116,22 @@ export interface PreviousWorktreeSeed {
   worktreePath: string;
 }
 
+/** The rules of `git check-ref-format`, so a bad name fails here and not after the first message. */
+export function isValidNewBranchName(name: string): boolean {
+  return (
+    name.length > 0 &&
+    !name.startsWith("-") &&
+    !name.endsWith("/") &&
+    !name.endsWith(".") &&
+    !name.includes("..") &&
+    !name.includes("//") &&
+    !name.includes("@{") &&
+    name !== "@" &&
+    !/[\x00-\x20\x7f~^:?*[\\]/.test(name) &&
+    name.split("/").every((part) => !part.startsWith(".") && !part.endsWith(".lock"))
+  );
+}
+
 export function countBusyThreadsOnCheckout(input: {
   threads: ReadonlyArray<{ id: string; worktreePath: string | null }>;
   projectCwd: string;

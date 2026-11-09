@@ -52,10 +52,13 @@ interface NewThreadWorkspaceOptions {
   worktreePath?: string | null;
   envMode?: DraftThreadEnvMode;
   startFromOrigin?: boolean;
+  newWorktreeBranch?: string | null;
 }
 
 function pickExplicitWorkspaceOptions(options: NewThreadWorkspaceOptions | undefined) {
   return {
+    // A reused draft must not keep the name typed for an earlier worktree.
+    newWorktreeBranch: options?.newWorktreeBranch ?? null,
     ...(options?.branch !== undefined ? { branch: options.branch } : {}),
     ...(options?.worktreePath !== undefined ? { worktreePath: options.worktreePath } : {}),
     ...(options?.envMode !== undefined ? { envMode: options.envMode } : {}),
@@ -82,6 +85,7 @@ export function createNewThreadHandler(router: AnyRouter) {
       worktreePath?: string | null;
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
+      newWorktreeBranch?: string | null;
       replace?: boolean;
       /** Composer text for the draft, set before it shows. A draft with user text keeps it. */
       prompt?: string;
@@ -273,6 +277,7 @@ export function createNewThreadHandler(router: AnyRouter) {
           workspaceContext = {
             branch: null,
             worktreePath: null,
+            newWorktreeBranch: null,
             envMode: defaultEnvMode,
             startFromOrigin: resolveNewDraftStartFromOrigin({
               envMode: defaultEnvMode,
@@ -397,6 +402,7 @@ export function createNewThreadHandler(router: AnyRouter) {
         createdAt,
         branch: options?.branch ?? null,
         worktreePath: options?.worktreePath ?? null,
+        newWorktreeBranch: options?.newWorktreeBranch ?? null,
         envMode: initialEnvMode,
         startFromOrigin:
           options?.startFromOrigin ??

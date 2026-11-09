@@ -75,6 +75,7 @@ export interface BranchToolbarHandle {
 }
 
 interface BranchToolbarProps {
+  newWorktreeBranch?: string | null;
   layout?: "composer" | "panel";
   panelSection?: "all" | "workspace" | "branch";
   forceNewWorktree?: boolean;
@@ -618,6 +619,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   availableEnvironments,
   onEnvironmentChange,
   trailing,
+  newWorktreeBranch = null,
 }: BranchToolbarProps) {
   const branchSelectorRef = useRef<BranchToolbarBranchSelectorHandle>(null);
   const threadRef = scopeThreadRef(environmentId, threadId);
@@ -647,6 +649,7 @@ export const BranchToolbar = memo(function BranchToolbar({
       branch: previousWorktreeSeed.branch,
       worktreePath: previousWorktreeSeed.worktreePath,
       envMode: "worktree",
+      newWorktreeBranch: null,
       projectRef: activeProjectRef,
     });
   };
@@ -804,6 +807,7 @@ export const BranchToolbar = memo(function BranchToolbar({
               previousWorktreeLabel={previousWorktreeLabel}
               previousWorktreeBranch={previousWorktreeSeed?.branch ?? null}
               onUsePreviousWorktree={onUsePreviousWorktree}
+              newWorktreeBranch={newWorktreeBranch}
             />
           ) : null}
         </div>
