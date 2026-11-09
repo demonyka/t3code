@@ -116,6 +116,19 @@ export interface PreviousWorktreeSeed {
   worktreePath: string;
 }
 
+export function countBusyThreadsOnCheckout(input: {
+  threads: ReadonlyArray<{ id: string; worktreePath: string | null }>;
+  projectCwd: string;
+  checkoutCwd: string;
+  activeThreadId: string | null;
+}): number {
+  return input.threads.filter(
+    (thread) =>
+      thread.id !== input.activeThreadId &&
+      (thread.worktreePath ?? input.projectCwd) === input.checkoutCwd,
+  ).length;
+}
+
 export function resolvePreviousWorktreeSeed(input: {
   threads: ReadonlyArray<{
     branch: string | null;

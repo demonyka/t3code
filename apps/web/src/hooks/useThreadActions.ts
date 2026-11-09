@@ -4,7 +4,11 @@ import {
   scopeThreadRef,
   scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
-import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import {
+  isAtomCommandInterrupted,
+  settlePromise,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import { canSnooze, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
 import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
 import {
@@ -12,6 +16,7 @@ import {
   AuthSourceControlWriteScope,
   EnvironmentAuthorizationError,
   EnvironmentId,
+  ProjectId,
   type ScopedThreadRef,
   ThreadId,
   sessionGrantsScope,
@@ -51,7 +56,11 @@ import { clearThreadPreviewState } from "../previewStateStore";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
-import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
+import {
+  findThreadsOnWorktree,
+  formatWorktreePathForDisplay,
+  getOrphanedWorktreePathForThread,
+} from "../worktreeCleanup";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useClientSettings } from "./useSettings";
 import * as ThreadUndo from "@t3tools/client-runtime/state/thread-undo";
@@ -651,6 +660,96 @@ export function useThreadActions() {
     return deleteResult;
   };
 
+  /**
+   * Removes a worktree's folder and archives its chats, keeping the branch. The
+   * folder goes first so a failed removal leaves the chats where they were.
+   */
+  const deleteWorktree = async (target: {
+    readonly environmentId: EnvironmentId;
+    readonly projectId: ProjectId;
+    readonly worktreePath: string;
+    readonly label: string;
+    readonly onConfirmed: () => void;
+  }) => {
+    const { environmentId, worktreePath, label } = target;
+    const localApi = readLocalApi();
+    const project = readProject({ environmentId, projectId: target.projectId });
+    if (!localApi || !project) return;
+    const showError = (title: string, description: string) =>
+      toastManager.add(stackedThreadToast({ type: "error", title, description }));
+    const failureMessage = (failure: Parameters<typeof squashAtomCommandFailure>[0]) => {
+      const error = squashAtomCommandFailure(failure);
+      return error instanceof Error ? error.message : "An error occurred.";
+    };
+    const readChats = () =>
+      findThreadsOnWorktree(readThreadShells(), { environmentId, worktreePath });
+    const refuseIfRunning = () => {
+      const running = readChats().filter((thread) => !threadRuntimeCanArchive(thread.runtime));
+      if (running.length === 0) return false;
+      showError(
+        `Could not delete ${label}`,
+        `${running.length} chat${running.length === 1 ? " is" : "s are"} still running here. Stop ${running.length === 1 ? "it" : "them"} first.`,
+      );
+      return true;
+    };
+    if (refuseIfRunning()) return;
+
+    const status = await refreshVcsStatus({
+      environmentId,
+      input: { cwd: worktreePath, localOnly: true },
+    });
+    // Storage cleanup may already have removed the folder; the chats still need clearing.
+    const folderExists = status._tag !== "Success" || status.value.isRepo;
+    const changedFiles = status._tag === "Success" ? status.value.workingTree.files.length : null;
+    const chatCount = readChats().length;
+    const confirmed = await settlePromise(() =>
+      localApi.dialogs.confirm(
+        [
+          `Delete worktree ${label}?`,
+          "",
+          "Its folder is removed. The branch stays.",
+          ...(chatCount === 0
+            ? []
+            : [`${chatCount} chat${chatCount === 1 ? "" : "s"} here will be archived.`]),
+          ...(changedFiles === null
+            ? ["Could not check for uncommitted changes. Any there will be lost."]
+            : changedFiles > 0
+              ? [
+                  `${changedFiles} file${changedFiles === 1 ? "" : "s"} with uncommitted changes will be lost.`,
+                ]
+              : []),
+        ].join("\n"),
+        { variant: "destructive" },
+      ),
+    );
+    if (confirmed._tag === "Failure" || !confirmed.value || refuseIfRunning()) return;
+    target.onConfirmed();
+
+    const chats = readChats();
+    for (const thread of chats) {
+      if (thread.runtime !== null) {
+        await stopThreadSession({ environmentId, input: { threadId: thread.id } });
+      }
+    }
+    if (folderExists) {
+      const removed = await removeWorktree({
+        environmentId,
+        input: { cwd: project.workspaceRoot, path: worktreePath, force: true },
+      });
+      if (removed._tag === "Failure") {
+        showError(`Could not delete ${label}`, failureMessage(removed));
+        return;
+      }
+      await refreshVcsStatus({ environmentId, input: { cwd: project.workspaceRoot } });
+    }
+    for (const thread of chats) {
+      const archived = await archiveThread(scopeThreadRef(environmentId, thread.id));
+      if (archived._tag === "Failure" && !isAtomCommandInterrupted(archived)) {
+        showError(`Could not archive "${thread.title}"`, failureMessage(archived));
+      }
+    }
+  };
+
   const unsettleThread = async (target: ScopedThreadRef) => {
     if (!readEnvironmentServerConfigLoaded(target.environmentId)) {
       return AsyncResult.failure(
@@ -954,6 +1053,7 @@ export function useThreadActions() {
     unarchiveThread,
     deleteThread,
     confirmAndDeleteThread,
+    deleteWorktree,
     settleThread,
     unsettleThread,
     snoozeThread,

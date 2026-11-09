@@ -275,6 +275,45 @@ function paginateBranches(input: {
   };
 }
 
+function parseWorktreeEntries(
+  stdout: string,
+): ReadonlyArray<{ path: string; refName: string | null; isMain: boolean }> {
+  const entries: Array<{ path: string; refName: string | null; isMain: boolean }> = [];
+  let path: string | null = null;
+  let refName: string | null = null;
+  let prunable = false;
+  let index = 0;
+  const flush = () => {
+    if (path === null) return;
+    // Git always lists the main worktree first.
+    if (!prunable) entries.push({ path, refName, isMain: index === 0 });
+    index += 1;
+    path = null;
+    refName = null;
+    prunable = false;
+  };
+  for (const field of stdout.split("\0")) {
+    if (field === "") flush();
+    else if (field.startsWith("worktree ")) path = field.slice("worktree ".length);
+    else if (field.startsWith("branch refs/heads/"))
+      refName = field.slice("branch refs/heads/".length);
+    else if (field === "prunable" || field.startsWith("prunable ")) prunable = true;
+  }
+  flush();
+  return entries;
+}
+
+function parseBranchBases(stdout: string): ReadonlyMap<string, string> {
+  const bases = new Map<string, string>();
+  for (const line of stdout.split("\n")) {
+    const match = /^branch\.(.+)\.(t3|gh)-merge-base\s+(.+)$/.exec(line);
+    if (match === null) continue;
+    const [, branch, source, base] = match;
+    if (source === "t3" || !bases.has(branch!)) bases.set(branch!, base!);
+  }
+  return bases;
+}
+
 function parseWorktreeBranchPaths(stdout: string): ReadonlyMap<string, string> {
   const worktreePaths = new Map<string, string>();
   let currentPath: string | null = null;
@@ -4864,6 +4903,64 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     return { branch: targetBranch };
   });
 
+  const listWorktrees: GitVcsDriver.GitVcsDriver["Service"]["listWorktrees"] = Effect.fn(
+    "listWorktrees",
+  )(function* (input) {
+    const [listing, configuredBases] = yield* Effect.all(
+      [
+        executeWorktreeList("GitVcsDriver.listWorktrees.list", input.cwd, [], {
+          timeoutMs: 5_000,
+        }),
+        executeGit(
+          "GitVcsDriver.listWorktrees.bases",
+          input.cwd,
+          ["config", "--local", "--get-regexp", "^branch\\..*\\.(t3|gh)-merge-base$"],
+          // Exit 1 only means no branch has a recorded base yet.
+          { allowNonZeroExit: true, timeoutMs: 5_000 },
+        ),
+      ],
+      { concurrency: "unbounded" },
+    );
+    const bases = parseBranchBases(configuredBases.exitCode === 0 ? configuredBases.stdout : "");
+    const compared = new Set(input.compareWorktreePaths);
+    const worktrees = yield* Effect.forEach(
+      parseWorktreeEntries(listing.stdout),
+      (entry) =>
+        Effect.gen(function* () {
+          const baseRefName =
+            entry.isMain || entry.refName === null ? null : (bases.get(entry.refName) ?? null);
+          const counts =
+            baseRefName !== null && compared.has(entry.path)
+              ? yield* executeGit(
+                  "GitVcsDriver.listWorktrees.compare",
+                  input.cwd,
+                  [
+                    "rev-list",
+                    "--left-right",
+                    "--count",
+                    `refs/heads/${baseRefName}...refs/heads/${entry.refName}`,
+                    "--",
+                  ],
+                  // The base branch may be gone; that only hides the counts.
+                  { allowNonZeroExit: true, timeoutMs: 5_000 },
+                ).pipe(
+                  Effect.map((result) =>
+                    result.exitCode === 0 ? /^(\d+)\s+(\d+)/.exec(result.stdout.trim()) : null,
+                  ),
+                )
+              : null;
+          return {
+            ...entry,
+            baseRefName,
+            behindBase: counts === null ? null : Number(counts[1]),
+            aheadOfBase: counts === null ? null : Number(counts[2]),
+          };
+        }),
+      { concurrency: 4 },
+    );
+    return { worktrees };
+  });
+
   const switchRef: GitVcsDriver.GitVcsDriver["Service"]["switchRef"] = Effect.fn("switchRef")(
     function* (input) {
       const [localInputExists, remoteExists] = yield* Effect.all(
@@ -4941,7 +5038,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         input.cwd,
         [...checkoutArgs, "--"],
         {
-          timeoutMs: 10_000,
+          // Large checkouts and post-checkout hooks routinely outlast a short limit.
+          timeoutMs: 120_000,
           fallbackErrorDetail: "git checkout failed",
           // Checking out a remote branch creates a local one that tracks it.
           writesSharedConfig: !localInputExists,
@@ -5085,6 +5183,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     readBranchBase,
     resolveBranchName,
     listRefs,
+    listWorktrees,
     createWorktree: Effect.fnUntraced(function* (input, options) {
       return yield* createWorktree(input, options).pipe(
         Effect.ensuring(invalidateWorktreeCreationCaches(input.cwd)),

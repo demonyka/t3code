@@ -287,6 +287,27 @@ export const VcsListRefsResult = Schema.Struct({
 });
 export type VcsListRefsResult = typeof VcsListRefsResult.Type;
 
+export const VcsListWorktreesInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+  // Worktrees to compare against their base; the rest stay cheap to list.
+  compareWorktreePaths: Schema.Array(TrimmedNonEmptyStringSchema),
+});
+export type VcsListWorktreesInput = typeof VcsListWorktreesInput.Type;
+
+const VcsListedWorktree = Schema.Struct({
+  path: TrimmedNonEmptyStringSchema,
+  refName: Schema.NullOr(TrimmedNonEmptyStringSchema),
+  isMain: Schema.Boolean,
+  baseRefName: Schema.NullOr(TrimmedNonEmptyStringSchema),
+  aheadOfBase: Schema.NullOr(NonNegativeInt),
+  behindBase: Schema.NullOr(NonNegativeInt),
+});
+
+export const VcsListWorktreesResult = Schema.Struct({
+  worktrees: Schema.Array(VcsListedWorktree),
+});
+export type VcsListWorktreesResult = typeof VcsListWorktreesResult.Type;
+
 export const VcsCreateWorktreeResult = Schema.Struct({
   worktree: VcsWorktree,
 });

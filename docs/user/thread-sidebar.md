@@ -150,14 +150,18 @@ cannot drag or move threads within it. Your saved order returns when you turn it
 
 ### Group threads by project (beta)
 
-Turn on **Settings → Labs → Boring sidebar (group by project)** on web and desktop to put active
-threads in a folder for each project. Pinned projects come first. A project with no active
-threads has no folder unless it is pinned or you pick it in the project filter. An archived
-project's folder comes last and shows only while it has active threads. Click a folder to open or
-close it. A closed folder shows how many threads it holds, and a dot when one of them
-needs you. Use the pen button on a folder, or right-click it, to start a thread in that project.
-Pinned threads stay above the folders, and Snoozed and Settled stay below them. In this mode you
-cannot drag threads, and the Working section is off. Each device keeps its own choice.
+On web and desktop, the sidebar shows a tree for each project. Its top row is the project's main
+checkout, named `project - branch`, and holds the chats that run there. Each worktree is a row below
+it, with its chats inside, and a worktree started from another worktree sits under that one. Rows keep
+their places while chats run. Right-click a project to move it up or down, and archive a project in
+its settings to take it off the list. Right-click a worktree and choose **Delete worktree** to remove
+its folder and archive its chats. The branch stays, and restoring a chat recreates the folder on its
+next turn.
+
+An arrow with a number on the top row means new commits are waiting on the remote; click it to pull.
+On a worktree, `↓` counts commits its base branch has that it does not. T3 Code checks for updates in
+the background, and the **Automatically pull** setting can apply them for you. Turn off
+**Settings → Labs → Boring sidebar (group by project)** for one flat list.
 
 ## Settle finished work
 

@@ -2,6 +2,7 @@ import { type VcsRef } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
 import {
+  countBusyThreadsOnCheckout,
   deriveLocalBranchNameFromRemoteRef,
   resolveBranchSelectionTarget,
   resolveDraftEnvModeAfterBranchChange,
@@ -155,6 +156,29 @@ describe("dedupeRemoteBranchesWithLocalMatches", () => {
       "upstream/feature",
       "my-org/upstream/feature",
     ]);
+  });
+});
+
+describe("countBusyThreadsOnCheckout", () => {
+  const threads = [
+    { id: "self", worktreePath: null },
+    { id: "same-folder", worktreePath: null },
+    { id: "own-worktree", worktreePath: "/w/a" },
+  ];
+
+  it.each([
+    ["the shared folder ignores worktree chats and the active chat", "/repo", 1],
+    ["a worktree counts only the chats inside it", "/w/a", 1],
+    ["a folder nobody works in", "/w/b", 0],
+  ])("%s", (_name, checkoutCwd, expected) => {
+    expect(
+      countBusyThreadsOnCheckout({
+        threads,
+        projectCwd: "/repo",
+        checkoutCwd,
+        activeThreadId: "self",
+      }),
+    ).toBe(expected);
   });
 });
 

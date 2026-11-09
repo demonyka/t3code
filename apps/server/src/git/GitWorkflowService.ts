@@ -19,6 +19,8 @@ import {
   type GitPreparePullRequestThreadResult,
   type GitPullRequestRefInput,
   type VcsPullResult,
+  type VcsListWorktreesInput,
+  type VcsListWorktreesResult,
   type VcsRemoveWorktreeInput,
   type GitResolvePullRequestResult,
   type GitRunStackedActionInput,
@@ -71,6 +73,9 @@ export class GitWorkflowService extends Context.Service<
     readonly preparePullRequestThread: (
       input: GitPreparePullRequestThreadInput,
     ) => Effect.Effect<GitPreparePullRequestThreadResult, GitManagerServiceError>;
+    readonly listWorktrees: (
+      input: VcsListWorktreesInput,
+    ) => Effect.Effect<VcsListWorktreesResult, GitCommandError>;
     readonly listRefs: (
       input: VcsListRefsInput,
     ) => Effect.Effect<VcsListRefsResult, GitCommandError>;
@@ -403,6 +408,13 @@ export const make = Effect.gen(function* () {
         );
       },
     ),
+    listWorktrees: Effect.fn("GitWorkflowService.listWorktrees")(function (input) {
+      return detectGitRepositoryForCommand("GitWorkflowService.listWorktrees", input.cwd).pipe(
+        Effect.flatMap((isGitRepository) =>
+          isGitRepository ? git.listWorktrees(input) : Effect.succeed({ worktrees: [] }),
+        ),
+      );
+    }),
     listRefs: Effect.fn("GitWorkflowService.listRefs")(function (input) {
       return detectGitRepositoryForCommand("GitWorkflowService.listRefs", input.cwd).pipe(
         Effect.flatMap((isGitRepository) =>

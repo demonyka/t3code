@@ -3,7 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
 import { makeThreadFixture } from "./test-fixtures";
-import { getOrphanedWorktreePathForThread } from "./worktreeCleanup";
+import { findThreadsOnWorktree, getOrphanedWorktreePathForThread } from "./worktreeCleanup";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
 
@@ -34,6 +34,30 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     ...overrides,
   });
 }
+
+describe("findThreadsOnWorktree", () => {
+  const environmentId = EnvironmentId.make("env-1");
+  const chat = (
+    id: string,
+    worktreePath: string | null,
+    overrides: { environmentId?: EnvironmentId; archivedAt?: string | null } = {},
+  ) => ({ id, environmentId, worktreePath, archivedAt: null, ...overrides });
+
+  it("finds live chats on the path however it was written, on this machine only", () => {
+    const found = findThreadsOnWorktree(
+      [
+        chat("plain", "/wt/a"),
+        chat("trailing-slash", "/wt/a/"),
+        chat("archived", "/wt/a", { archivedAt: "2026-01-01T00:00:00.000Z" }),
+        chat("other-machine", "/wt/a", { environmentId: EnvironmentId.make("env-2") }),
+        chat("other-worktree", "/wt/b"),
+        chat("main-checkout", null),
+      ],
+      { environmentId, worktreePath: "/wt/a" },
+    );
+    expect(found.map((thread) => thread.id)).toEqual(["plain", "trailing-slash"]);
+  });
+});
 
 describe("getOrphanedWorktreePathForThread", () => {
   it("returns null when another thread links to the same worktree", () => {

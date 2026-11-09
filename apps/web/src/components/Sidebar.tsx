@@ -55,6 +55,7 @@ import {
 } from "@t3tools/client-runtime/environment";
 import {
   AuthOrchestrationOperateScope,
+  AuthSourceControlWriteScope,
   ProjectId,
   type ScopedThreadRef,
   type ThreadId,
@@ -116,6 +117,16 @@ import {
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
 import { resolveProjectExpanded, useUiStateStore } from "../uiStateStore";
+import { getProjectOrderKey } from "@t3tools/client-runtime/state/project-grouping";
+import { vcsWorktreeLists } from "../state/vcs";
+import { SidebarWorktreeRow } from "./sidebar/SidebarWorktreeRow";
+import {
+  buildSidebarFolderTree,
+  buildSidebarWorktreeTargets,
+  flattenSidebarWorktreeTree,
+  type SidebarTreeRow,
+  type SidebarWorktreeNode,
+} from "./sidebar/worktreeTree";
 import {
   getThreadKeysToDeselectAfterDelete,
   useThreadSelectionStore,
@@ -324,6 +335,10 @@ const sidebarProviderEntriesAtom = Atom.make((get) => {
 const EMPTY_PROVIDER_ENTRIES: ReadonlyMap<string, SidebarProviderEntry> = new Map();
 const EMPTY_THREADS: readonly EnvironmentThreadShell[] = [];
 
+function sidebarWorktreeExpansionKey(nodeKey: string) {
+  return `worktree-node:${nodeKey}`;
+}
+
 const SETTLED_TAIL_INITIAL_COUNT = 10;
 const SETTLED_TAIL_PAGE_COUNT = 25;
 const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar:settled-expanded";
@@ -353,7 +368,6 @@ interface SidebarThreadPartitionInput {
   readonly optimisticDrop: SidebarOptimisticDrop | null;
   readonly workingShelfEnabled: boolean;
   /** Boring mode: folders list active threads by the user's latest message. */
-  readonly sortActiveBySend: boolean;
   // Snooze wakes, the queued-turn grace and the Working shelf's exit grace depend
   // on the clock, so the minute tick, the precise snooze-wake tick and the inbox
   // tracker's expiry version are inputs: a new key repartitions.
@@ -482,7 +496,6 @@ function useSidebarThreads(input: {
     connectedEnvironmentIds,
     optimisticDrop,
     workingShelfEnabled,
-    sortActiveBySend: folderGroups !== null,
     clockKey: `${nowMinute}:${snoozeWakeClock}:${inboxReturnsVersion}`,
   });
 
@@ -520,6 +533,15 @@ function useSidebarThreads(input: {
   const visibleWorkingThreads = workingShelfExpanded
     ? workingThreads
     : routeThreadOnly(workingThreads, routeRowThreadKey);
+  const worktreeLists = useAtomValue(
+    vcsWorktreeLists(
+      JSON.stringify(
+        folderGroups === null ? [] : buildSidebarWorktreeTargets(folderGroups, activeThreads),
+      ),
+    ),
+  );
+  const isWorktreeCollapsed = (nodeKey: string) =>
+    projectExpandedById[sidebarWorktreeExpansionKey(nodeKey)] === false;
   const projectFolders =
     folderGroups === null
       ? null
@@ -528,13 +550,30 @@ function useSidebarThreads(input: {
             projectExpandedById,
             sidebarFolderExpansionKeys(folder.group),
           );
+          const rows: Array<SidebarTreeRow<EnvironmentThreadShell>> = collapsed
+            ? // A closed folder still shows the open thread, and hints at the rest.
+              routeThreadOnly(folder.threads, routeRowThreadKey).map((thread) => ({
+                kind: "thread",
+                thread,
+                depth: 0,
+                parentRow: null,
+              }))
+            : flattenSidebarWorktreeTree(
+                buildSidebarFolderTree({
+                  group: folder.group,
+                  threads: folder.threads,
+                  worktreeLists,
+                }),
+                {
+                  isCollapsed: isWorktreeCollapsed,
+                  isRouteThread: (thread) => threadShellKey(thread) === routeRowThreadKey,
+                },
+              );
           return {
             group: folder.group,
             collapsed,
-            // A closed folder still shows the open thread, and hints at the rest.
-            threads: collapsed
-              ? routeThreadOnly(folder.threads, routeRowThreadKey)
-              : folder.threads,
+            rows,
+            threads: rows.flatMap((row) => (row.kind === "thread" ? [row.thread] : [])),
             hiddenThreads: collapsed
               ? folder.threads.filter((thread) => threadShellKey(thread) !== routeRowThreadKey)
               : EMPTY_THREADS,
@@ -590,6 +629,9 @@ function useSidebarThreads(input: {
       const keys = sidebarFolderExpansionKeys(group);
       setProjectExpanded(keys, !resolveProjectExpanded(projectExpandedById, keys));
     },
+    toggleWorktreeNode: (nodeKey: string) => {
+      setProjectExpanded([sidebarWorktreeExpansionKey(nodeKey)], isWorktreeCollapsed(nodeKey));
+    },
     renderedSettledThreads,
     visibleSnoozedThreads,
     visibleWorkingThreads,
@@ -617,7 +659,6 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
     serverConfigs,
     optimisticDrop,
     workingShelfEnabled,
-    sortActiveBySend,
   } = input;
   const preciseNow = new Date().toISOString();
   const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys, delegatedUnderParent);
@@ -675,11 +716,9 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   }
   // Availability gates dragging only; sorting must stay consistent across clients.
   const sortedPinned = sortPinnedThreadsForSidebar(pinned);
-  const sortedActive = sortActiveBySend
-    ? sortWorkingThreadsBySend(active)
-    : workingShelfEnabled
-      ? sortInboxThreadsByReturn(active, inboxObservation.returnedAt)
-      : sortThreadsForSidebar(active);
+  const sortedActive = workingShelfEnabled
+    ? sortInboxThreadsByReturn(active, inboxObservation.returnedAt)
+    : sortThreadsForSidebar(active);
   return {
     pinnedThreads:
       optimisticDrop?.section !== "pinned" || optimisticDrop.order === null
@@ -915,6 +954,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
+  const projectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
+  const reorderProjects = useUiStateStore((store) => store.reorderProjects);
   const {
     settleThread,
     unsettleThread,
@@ -930,6 +971,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     markThreadUnread,
     archiveThread,
     deleteThread,
+    deleteWorktree,
   } = useThreadActions();
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
@@ -1249,16 +1291,106 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (isMobile) setOpenMobile(false);
     void handleNewThread(scopeProjectRef(group.environmentId, group.id));
   });
-  const handleProjectFolderContextMenu = useStableCallback(
-    (group: SidebarProjectSnapshot, position: { x: number; y: number }) => {
+  const startThreadInWorktree = useStableCallback(
+    (node: SidebarWorktreeNode<EnvironmentThreadShell>) => {
+      if (isMobile) setOpenMobile(false);
+      void handleNewThread(
+        scopeProjectRef(node.environmentId, ProjectId.make(node.projectId)),
+        node.checkoutLabel === null
+          ? { branch: node.branch, worktreePath: node.path, envMode: "worktree" }
+          : undefined,
+      );
+    },
+  );
+  const [deletingWorktreeKeys, setDeletingWorktreeKeys] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
+  const removeWorktreeNode = (node: SidebarWorktreeNode<EnvironmentThreadShell>) =>
+    deleteWorktree({
+      environmentId: node.environmentId,
+      projectId: ProjectId.make(node.projectId),
+      worktreePath: node.path,
+      label: node.branch ?? node.path,
+      onConfirmed: () => setDeletingWorktreeKeys((keys) => new Set(keys).add(node.key)),
+    }).finally(() =>
+      setDeletingWorktreeKeys((keys) => {
+        const next = new Set(keys);
+        next.delete(node.key);
+        return next;
+      }),
+    );
+  const handleWorktreeContextMenu = useStableCallback(
+    (node: SidebarWorktreeNode<EnvironmentThreadShell>, position: { x: number; y: number }) => {
       const api = readLocalApi();
       if (!api) return;
       void (async () => {
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
             [
-              { id: "new-thread", label: "New thread" },
+              { id: "new-thread", label: "New thread here" },
+              ...(node.branch === null
+                ? []
+                : [{ id: "new-worktree", label: `New worktree from ${node.branch}` }]),
               { id: "copy-path", label: "Copy path" },
+              ...(node.checkoutLabel === null &&
+              readEnvironmentScope(node.environmentId, AuthSourceControlWriteScope)
+                ? [{ id: "delete-worktree", label: "Delete worktree", destructive: true }]
+                : []),
+            ],
+            position,
+          ),
+        );
+        if (clicked._tag === "Failure") return;
+        switch (clicked.value) {
+          case "new-thread":
+            startThreadInWorktree(node);
+            return;
+          case "new-worktree":
+            if (isMobile) setOpenMobile(false);
+            void handleNewThread(
+              scopeProjectRef(node.environmentId, ProjectId.make(node.projectId)),
+              { branch: node.branch, worktreePath: null, envMode: "worktree" },
+            );
+            return;
+          case "copy-path":
+            copyPathToClipboard(node.path, { path: node.path });
+            return;
+          case "delete-worktree":
+            await removeWorktreeNode(node);
+            return;
+        }
+      })();
+    },
+  );
+  const projectFolderMoveOptions = (group: SidebarProjectSnapshot) => {
+    if (projectSortOrder !== "manual") return { up: null, down: null };
+    const listed = projectGroups.filter((project) => !project.archived);
+    const index = listed.findIndex((project) => project.projectKey === group.projectKey);
+    return { up: listed[index - 1] ?? null, down: listed[index + 1] ?? null };
+  };
+  const moveProjectFolder = (
+    group: SidebarProjectSnapshot,
+    target: SidebarProjectSnapshot | null,
+  ) => {
+    if (target === null) return;
+    const memberKeys = (project: SidebarProjectSnapshot) =>
+      project.memberProjects.map(getProjectOrderKey);
+    reorderProjects(projectGroups.flatMap(memberKeys), memberKeys(group), memberKeys(target));
+  };
+  const handleProjectFolderContextMenu = useStableCallback(
+    (group: SidebarProjectSnapshot, position: { x: number; y: number }) => {
+      const api = readLocalApi();
+      if (!api) return;
+      const moveOptions = projectFolderMoveOptions(group);
+      void (async () => {
+        const clicked = await settlePromise(() =>
+          api.contextMenu.show(
+            [
+              { id: "new-thread", label: "New thread" },
+              { id: "new-worktree", label: "New thread in a new worktree" },
+              { id: "copy-path", label: "Copy path" },
+              ...(moveOptions.up === null ? [] : [{ id: "move-up", label: "Move up" }]),
+              ...(moveOptions.down === null ? [] : [{ id: "move-down", label: "Move down" }]),
               ...(canPinProject(group)
                 ? [
                     group.pinned
@@ -1276,8 +1408,22 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           case "new-thread":
             startThreadInProjectFolder(group);
             return;
+          case "new-worktree":
+            if (isMobile) setOpenMobile(false);
+            void handleNewThread(scopeProjectRef(group.environmentId, group.id), {
+              worktreePath: null,
+              envMode: "worktree",
+            });
+            return;
           case "copy-path":
             copyPathToClipboard(group.workspaceRoot, { path: group.workspaceRoot });
+            return;
+          case "move-up":
+          case "move-down":
+            moveProjectFolder(
+              group,
+              clicked.value === "move-up" ? moveOptions.up : moveOptions.down,
+            );
             return;
           case "pin":
           case "unpin":
@@ -1315,6 +1461,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     toggleWorkingShelf,
     projectFolders,
     toggleProjectFolder,
+    toggleWorktreeNode,
     renderedSettledThreads,
     visibleSnoozedThreads,
     visibleWorkingThreads,
@@ -1342,9 +1489,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           [...scopeGroups, ...projectGroups.filter((project) => project.archived)]
         : scopedProjectGroups
       : null,
-    keepEmptyFolders: (group) =>
-      scopedProjectGroups.length > 0 || (group.pinned && !group.archived),
+    keepEmptyFolders: (group) => scopedProjectGroups.length > 0 || !group.archived,
   });
+  const handleToggleWorktree = useStableCallback(
+    (node: SidebarWorktreeNode<EnvironmentThreadShell>) => toggleWorktreeNode(node.key),
+  );
 
   // Ranked across environments as the palette ranks them, so one
   // environment's list does not sit above another's better matches; rows
@@ -1983,7 +2132,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const listMotionLayoutKey = [
     sidebarListItemsKey,
     projectFolders
-      ?.map((folder) => `${folder.group.projectKey}:${folder.threads.length}`)
+      ?.map(
+        (folder) =>
+          `${folder.group.projectKey}:${folder.rows
+            .map((row) => (row.kind === "worktree" ? row.node.key : "t"))
+            .join(",")}`,
+      )
       .join("\n") ?? "",
     visibleDraftSessionCount,
     routeDraftIdForRows ?? "",
@@ -3324,6 +3478,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         section: SidebarSection,
                         // The tree row of the project folder this row sits in.
                         folderRow?: string,
+                        treeDepth = 0,
                       ) => {
                         const threadKey = scopedThreadKey(
                           scopeThreadRef(thread.environmentId, thread.id),
@@ -3350,6 +3505,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             }
                             thread={thread}
                             variant={rowVariant}
+                            treeDepth={treeDepth}
                             navigationParent={
                               folderRow ??
                               (section === "working" ||
@@ -3471,12 +3627,29 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 onContextMenu={handleProjectFolderContextMenu}
                               />,
                             );
-                            for (const thread of folder.threads) {
+                            const folderRow = sidebarFolderRowId(folder.group.projectKey);
+                            for (const row of folder.rows) {
                               items.push(
-                                renderThreadRow(
-                                  thread,
-                                  "active",
-                                  sidebarFolderRowId(folder.group.projectKey),
+                                row.kind === "thread" ? (
+                                  renderThreadRow(
+                                    row.thread,
+                                    "active",
+                                    row.parentRow ?? folderRow,
+                                    row.depth,
+                                  )
+                                ) : (
+                                  <SidebarWorktreeRow
+                                    key={`worktree:${row.node.key}`}
+                                    node={row.node}
+                                    depth={row.depth}
+                                    parentRow={row.parentRow ?? folderRow}
+                                    collapsed={row.collapsed}
+                                    isDeleting={deletingWorktreeKeys.has(row.node.key)}
+                                    hiddenThreads={row.hiddenThreads}
+                                    onToggle={handleToggleWorktree}
+                                    onNewThread={startThreadInWorktree}
+                                    onContextMenu={handleWorktreeContextMenu}
+                                  />
                                 ),
                               );
                             }

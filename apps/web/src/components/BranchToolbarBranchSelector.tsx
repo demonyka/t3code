@@ -16,6 +16,7 @@ import {
   type VcsRef,
   type ThreadId,
 } from "@t3tools/contracts";
+import { isThreadWorking } from "@t3tools/client-runtime/state/thread-inbox";
 import { GitBranchIcon } from "lucide-react";
 import {
   useEffect,
@@ -32,7 +33,7 @@ import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { readLocalApi } from "../localApi";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { usePaginatedBranches } from "../state/queries";
-import { useProject, useQuietThreadShell } from "../state/entities";
+import { readThreadShells, useProject, useQuietThreadShell } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { threadEnvironment } from "../state/threads";
@@ -45,6 +46,7 @@ import { parsePullRequestReference } from "@t3tools/client-runtime/pull-request-
 import { getSourceControlPresentation } from "../sourceControlPresentation";
 import { useComposerMenuProps } from "./chat/composerEventScope";
 import {
+  countBusyThreadsOnCheckout,
   deriveLocalBranchNameFromRemoteRef,
   resolveBranchTriggerLabel,
   resolveBranchToolbarPrBranch,
@@ -63,6 +65,7 @@ import {
 } from "./ThreadStatusIndicators";
 
 import { ComboboxItem, ComboboxTrigger } from "./ui/combobox";
+import { Spinner } from "./ui/spinner";
 import { ComposerControl } from "./chat/ComposerControl";
 import { MiddleTruncate } from "./ui/middle-truncate";
 import { BranchPicker, BranchPickerRefItem } from "./BranchPicker";
@@ -383,6 +386,28 @@ export function BranchToolbarBranchSelector({
     });
   };
 
+  // Git moves every chat sharing this folder, so a running agent must not be surprised.
+  const confirmCheckoutMove = async (checkoutCwd: string, targetBranch: string) => {
+    if (activeProjectCwd === null) return true;
+    const busy = countBusyThreadsOnCheckout({
+      threads: readThreadShells().filter(
+        (thread) =>
+          thread.environmentId === environmentId &&
+          thread.projectId === activeProjectRef?.projectId &&
+          isThreadWorking(thread),
+      ),
+      projectCwd: activeProjectCwd,
+      checkoutCwd,
+      activeThreadId: activeThreadId ?? null,
+    });
+    if (busy === 0) return true;
+    const api = readLocalApi();
+    if (!api) return true;
+    return api.dialogs.confirm(
+      `${busy} other running chat${busy === 1 ? " works" : "s work"} in this folder. Switching to ${targetBranch} changes the files under them. Switch anyway?`,
+    );
+  };
+
   const selectBranch = (refName: VcsRef) => {
     if (!canUpdateThreadBranch || !branchCwd || !activeProjectCwd || isBranchActionPending) return;
 
@@ -415,6 +440,7 @@ export function BranchToolbarBranchSelector({
     onComposerFocusRequest?.();
 
     runBranchAction(async () => {
+      if (!(await confirmCheckoutMove(selectionTarget.checkoutCwd, selectedBranchName))) return;
       const previousBranch = resolvedActiveBranch;
       setOptimisticBranch(selectedBranchName);
       const checkoutResult = await switchRef({
@@ -454,6 +480,7 @@ export function BranchToolbarBranchSelector({
     onComposerFocusRequest?.();
 
     runBranchAction(async () => {
+      if (!(await confirmCheckoutMove(branchCwd, name))) return;
       const previousBranch = resolvedActiveBranch;
       setOptimisticBranch(name);
       const createBranchResult = await createRefMutation({
@@ -723,15 +750,24 @@ export function BranchToolbarBranchSelector({
             }
             className="min-w-0 max-w-full active:scale-100"
             disabled={isInitialBranchesLoadPending || isBranchActionPending}
+            aria-busy={isBranchActionPending || undefined}
           >
-            <GitBranchIcon
-              className={cn(
-                "size-3 shrink-0",
-                displayMode === "panel" && THREAD_DETAILS_PANEL_ICON_CLASS,
-              )}
-            />
+            {isBranchActionPending ? (
+              <Spinner size="xs" className="shrink-0" />
+            ) : (
+              <GitBranchIcon
+                className={cn(
+                  "size-3 shrink-0",
+                  displayMode === "panel" && THREAD_DETAILS_PANEL_ICON_CLASS,
+                )}
+              />
+            )}
             <ComposerContextLabel displayMode={displayMode}>
-              <MiddleTruncate value={triggerLabel} variant="cap-aligned" className="w-full" />
+              <MiddleTruncate
+                value={isBranchActionPending ? `Switching to ${triggerLabel}…` : triggerLabel}
+                variant="cap-aligned"
+                className="w-full"
+              />
             </ComposerContextLabel>
           </ComboboxTrigger>
         </span>

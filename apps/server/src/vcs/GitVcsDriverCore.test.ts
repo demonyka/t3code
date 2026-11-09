@@ -4413,6 +4413,74 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
   });
 
   describe("worktree operations", () => {
+    it.effect("lists worktrees with their base and how far each drifted from it", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const worktrees = yield* makeTmpDir("git-worktrees-");
+        const parentPath = path.join(worktrees, "parent");
+        const childPath = path.join(worktrees, "child");
+        yield* driver.createWorktree({
+          cwd,
+          path: parentPath,
+          refName: initialBranch,
+          newRefName: "feature/parent",
+          baseRefName: initialBranch,
+        });
+        yield* driver.createWorktree({
+          cwd,
+          path: childPath,
+          refName: "feature/parent",
+          newRefName: "feature/child",
+          baseRefName: "feature/parent",
+        });
+        yield* git(parentPath, ["commit", "--allow-empty", "-m", "parent moved"]);
+        yield* git(childPath, ["commit", "--allow-empty", "-m", "child one"]);
+        yield* git(childPath, ["commit", "--allow-empty", "-m", "child two"]);
+
+        const { worktrees: listed } = yield* driver.listWorktrees({
+          cwd,
+          compareWorktreePaths: [yield* fs.realPath(childPath)],
+        });
+
+        assert.deepStrictEqual(
+          listed.map(({ refName, isMain, baseRefName, aheadOfBase, behindBase }) => ({
+            refName,
+            isMain,
+            baseRefName,
+            aheadOfBase,
+            behindBase,
+          })),
+          [
+            {
+              refName: initialBranch,
+              isMain: true,
+              baseRefName: null,
+              aheadOfBase: null,
+              behindBase: null,
+            },
+            {
+              refName: "feature/child",
+              isMain: false,
+              baseRefName: "feature/parent",
+              aheadOfBase: 2,
+              behindBase: 1,
+            },
+            {
+              refName: "feature/parent",
+              isMain: false,
+              baseRefName: initialBranch,
+              aheadOfBase: null,
+              behindBase: null,
+            },
+          ],
+        );
+      }).pipe(Effect.provide(layerTest)),
+    );
+
     it.effect("uses parallel checkout without skipping filters or hooks", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

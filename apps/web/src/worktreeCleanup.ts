@@ -29,6 +29,22 @@ export function getOrphanedWorktreePathForThread(
   return isShared ? null : targetWorktreePath;
 }
 
+export function findThreadsOnWorktree<
+  TThread extends Pick<ThreadShell, "environmentId" | "worktreePath" | "archivedAt">,
+>(
+  threads: readonly TThread[],
+  target: { readonly environmentId: TThread["environmentId"]; readonly worktreePath: string },
+): TThread[] {
+  const targetKey = normalizeProjectPathForComparison(target.worktreePath);
+  return threads.filter(
+    (thread) =>
+      thread.environmentId === target.environmentId &&
+      thread.archivedAt === null &&
+      thread.worktreePath !== null &&
+      normalizeProjectPathForComparison(thread.worktreePath) === targetKey,
+  );
+}
+
 export function formatWorktreePathForDisplay(worktreePath: string): string {
   const trimmed = worktreePath.trim();
   if (!trimmed) {
