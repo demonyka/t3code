@@ -24,13 +24,7 @@ jobs:
         run: cp .env.example .env
       - name: Build installer
         shell: bash
-        env:
-          T3CODE_DESKTOP_KEEP_STAGE: "true"
         run: vp run dist:desktop:win
-      - name: List packaged files
-        if: always()
-        shell: bash
-        run: find "$RUNNER_TEMP" /tmp -type d -name win-unpacked 2>/dev/null | head -1 | xargs -I{} find {} -type f | sed 's/.*win-unpacked//' | sort
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: t3code-windows-installer
