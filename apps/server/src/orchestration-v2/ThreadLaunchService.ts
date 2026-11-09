@@ -397,8 +397,10 @@ const make = Effect.gen(function* () {
         }
         let startRef = input.workspaceStrategy.baseRef;
         let baseRefName = input.workspaceStrategy.baseRef;
+        // A branch based on itself means "check out this branch", so the branch is not ours to delete.
+        const checksOutExistingBranch = branch === input.workspaceStrategy.baseRef;
         const remote =
-          input.workspaceStrategy.startFromOrigin === true
+          input.workspaceStrategy.startFromOrigin === true && !checksOutExistingBranch
             ? yield* git
                 .resolveWorktreeBaseRemote({
                   cwd: project.workspaceRoot,
@@ -439,9 +441,9 @@ const make = Effect.gen(function* () {
           .createWorktree(
             {
               cwd: project.workspaceRoot,
-              refName: startRef,
-              newRefName: branch!,
-              baseRefName,
+              ...(checksOutExistingBranch
+                ? { refName: branch! }
+                : { refName: startRef, newRefName: branch!, baseRefName }),
               path: null,
             },
             {
@@ -449,7 +451,7 @@ const make = Effect.gen(function* () {
                 onWorktreeClaimed: (path) =>
                   Effect.sync(() => {
                     createdWorktreePath = path;
-                    createdBranch = branch;
+                    createdBranch = checksOutExistingBranch ? null : branch;
                   }),
                 onCheckoutProgress: (progress) =>
                   setupTracker.stage(threadId, "checkout", { percent: progress.percent }),
@@ -460,7 +462,7 @@ const make = Effect.gen(function* () {
         worktreePath = worktree.worktree.path;
         branch = worktree.worktree.refName;
         createdWorktreePath = worktreePath;
-        createdBranch = branch;
+        createdBranch = checksOutExistingBranch ? null : branch;
         yield* setupTracker.update(threadId, (snapshot) => ({ ...snapshot, worktreePath, branch }));
         yield* setupTracker.stageStatus(threadId, "checkout", "done");
       }

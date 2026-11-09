@@ -155,7 +155,7 @@ checkout, named `project - branch`, and holds the chats that run there. Each wor
 it, with its chats inside, and a worktree started from another worktree sits under that one. Rows keep
 their places while chats run. Right-click a project to move it up or down, and archive a project in
 its settings to take it off the list. Right-click a project or worktree to start a new worktree under a branch name you choose, or leave
-the name empty to generate one. Right-click a worktree and choose **Delete worktree** to remove
+the name empty to generate one. If the branch already exists, you can open it instead. Right-click a worktree and choose **Delete worktree** to remove
 its folder and archive its chats. The branch stays, and restoring a chat recreates the folder on its
 next turn.
 

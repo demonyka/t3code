@@ -2287,6 +2287,38 @@ it.effect(
     }),
 );
 
+it.effect("checks out an existing branch and keeps it when setup is cancelled", () =>
+  Effect.gen(function* () {
+    const claimed = yield* Deferred.make<void>();
+    const harness = makeHarness({
+      createWorktree: (_input, options) =>
+        (options?.progress?.onWorktreeClaimed?.("/repo-worktrees/feature") ?? Effect.void).pipe(
+          Effect.andThen(Deferred.succeed(claimed, undefined)),
+          Effect.andThen(Effect.never),
+        ),
+    });
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const tracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
+      const launched = yield* launches.launch(
+        launchInput({
+          command: "launch:existing-branch",
+          thread: "thread:existing-branch",
+          message: "Start",
+          workspace: { type: "worktree", baseRef: "feature", branch: "feature" },
+        }),
+      );
+      yield* Deferred.await(claimed);
+      const created = harness.createWorktree.mock.calls[0]?.[0];
+      assert.equal(created?.refName, "feature");
+      assert.isUndefined(created?.newRefName);
+      assert.isTrue(yield* tracker.cancel(launched.threadId));
+      assert.equal(harness.removeWorktree.mock.calls[0]?.[0].path, "/repo-worktrees/feature");
+      assert.isEmpty(harness.deleteLocalBranch.mock.calls);
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
 it.effect("stops an in-flight branch rename when tracked setup is cancelled", () =>
   Effect.gen(function* () {
     const setupEntered = yield* Deferred.make<void>();

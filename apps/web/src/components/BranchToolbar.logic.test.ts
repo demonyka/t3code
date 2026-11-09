@@ -2,6 +2,7 @@ import { type VcsRef } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
 import {
+  resolveExistingBranchTarget,
   isValidNewBranchName,
   countBusyThreadsOnCheckout,
   deriveLocalBranchNameFromRemoteRef,
@@ -157,6 +158,45 @@ describe("dedupeRemoteBranchesWithLocalMatches", () => {
       "upstream/feature",
       "my-org/upstream/feature",
     ]);
+  });
+});
+
+describe("resolveExistingBranchTarget", () => {
+  const ref = (name: string, overrides: Partial<VcsRef> = {}): VcsRef => ({
+    name,
+    current: false,
+    isDefault: false,
+    worktreePath: null,
+    ...overrides,
+  });
+
+  it.each([
+    ["no such branch", [ref("other")], null],
+    ["a free local branch", [ref("feat")], { kind: "branch" }],
+    [
+      "a branch in another worktree",
+      [ref("feat", { worktreePath: "/w/feat" })],
+      { kind: "worktree", worktreePath: "/w/feat" },
+    ],
+    [
+      "a branch in the project folder",
+      [ref("feat", { worktreePath: "/repo/" })],
+      { kind: "project-folder" },
+    ],
+    [
+      "a branch only on the remote",
+      [ref("origin/feat", { isRemote: true, remoteName: "origin" })],
+      { kind: "remote", remoteRef: "origin/feat" },
+    ],
+    [
+      "a local branch before its remote",
+      [ref("origin/feat", { isRemote: true, remoteName: "origin" }), ref("feat")],
+      { kind: "branch" },
+    ],
+  ] as const)("%s", (_name, refs, expected) => {
+    expect(resolveExistingBranchTarget({ refs, branch: "feat", projectCwd: "/repo" })).toEqual(
+      expected,
+    );
   });
 });
 

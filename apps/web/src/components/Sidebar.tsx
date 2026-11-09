@@ -9,7 +9,7 @@ import {
 } from "./chat/threadContextDrag";
 import { discardComposerDraft } from "../lib/discardComposerDraft";
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
-import { requestNewWorktreeName } from "./NewWorktreeDialog";
+import { type NewWorktreeChoice, requestNewWorktreeName } from "./NewWorktreeDialog";
 import { useAtomValue } from "@effect/atom-react";
 import * as Option from "effect/Option";
 import { Atom } from "effect/reactivity";
@@ -162,6 +162,7 @@ import {
   useProjects,
   useServerConfigs,
   useQuietThreadShells,
+  readProject,
 } from "../state/entities";
 import { environmentPresentations } from "../state/presentation";
 import { primaryServerKeybindingsAtom } from "../state/server";
@@ -335,6 +336,37 @@ const sidebarProviderEntriesAtom = Atom.make((get) => {
 
 const EMPTY_PROVIDER_ENTRIES: ReadonlyMap<string, SidebarProviderEntry> = new Map();
 const EMPTY_THREADS: readonly EnvironmentThreadShell[] = [];
+
+function resolveNewWorktreeThreadOptions(choice: NewWorktreeChoice, baseBranch: string | null) {
+  if (choice.kind === "new") {
+    return {
+      branch: baseBranch,
+      worktreePath: null,
+      envMode: "worktree" as const,
+      newWorktreeBranch: choice.branch,
+    };
+  }
+  switch (choice.target.kind) {
+    case "worktree":
+      return {
+        branch: choice.branch,
+        worktreePath: choice.target.worktreePath,
+        envMode: "worktree" as const,
+      };
+    case "project-folder":
+      return { branch: choice.branch, worktreePath: null, envMode: "local" as const };
+    case "branch":
+    case "remote":
+      // The server reads a branch based on itself as "check out this branch".
+      return {
+        branch: choice.branch,
+        worktreePath: null,
+        envMode: "worktree" as const,
+        newWorktreeBranch: choice.branch,
+        startFromOrigin: false,
+      };
+  }
+}
 
 function sidebarWorktreeExpansionKey(nodeKey: string) {
   return `worktree-node:${nodeKey}`;
@@ -1296,17 +1328,16 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     readonly environmentId: EnvironmentId;
     readonly projectId: ProjectId;
     readonly cwd: string;
+    readonly projectCwd: string;
     readonly baseBranch: string | null;
   }) => {
     const choice = await requestNewWorktreeName(target);
     if (choice === null) return;
     if (isMobile) setOpenMobile(false);
-    void handleNewThread(scopeProjectRef(target.environmentId, target.projectId), {
-      branch: target.baseBranch,
-      worktreePath: null,
-      envMode: "worktree",
-      newWorktreeBranch: choice.branch,
-    });
+    void handleNewThread(
+      scopeProjectRef(target.environmentId, target.projectId),
+      resolveNewWorktreeThreadOptions(choice, target.baseBranch),
+    );
   };
   const startThreadInWorktree = useStableCallback(
     (node: SidebarWorktreeNode<EnvironmentThreadShell>) => {
@@ -1367,6 +1398,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               environmentId: node.environmentId,
               projectId: ProjectId.make(node.projectId),
               cwd: node.path,
+              projectCwd:
+                readProject({
+                  environmentId: node.environmentId,
+                  projectId: ProjectId.make(node.projectId),
+                })?.workspaceRoot ?? node.path,
               baseBranch: node.branch,
             });
             return;
@@ -1431,6 +1467,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               environmentId: group.environmentId,
               projectId: group.id,
               cwd: group.workspaceRoot,
+              projectCwd: group.workspaceRoot,
               baseBranch: null,
             });
             return;

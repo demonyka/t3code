@@ -6,8 +6,8 @@ import type {
   WorktreeSubmodules,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import { sanitizeNewRefName } from "@t3tools/shared/git";
-import { workspaceRelativeFilePath } from "@t3tools/shared/path";
+import { deriveLocalBranchNameFromRemoteRef, sanitizeNewRefName } from "@t3tools/shared/git";
+import { normalizeProjectPathForComparison, workspaceRelativeFilePath } from "@t3tools/shared/path";
 import { toSortableTimestamp } from "@t3tools/client-runtime/state/thread-sort";
 export { deriveLocalBranchNameFromRemoteRef, sanitizeNewRefName } from "@t3tools/shared/git";
 
@@ -130,6 +130,32 @@ export function isValidNewBranchName(name: string): boolean {
     !/[\x00-\x20\x7f~^:?*[\\]/.test(name) &&
     name.split("/").every((part) => !part.startsWith(".") && !part.endsWith(".lock"))
   );
+}
+
+export type ExistingBranchTarget =
+  | { readonly kind: "branch" }
+  | { readonly kind: "remote"; readonly remoteRef: string }
+  | { readonly kind: "worktree"; readonly worktreePath: string }
+  | { readonly kind: "project-folder" };
+
+/** Where a branch the user named for a new worktree already lives, if anywhere. */
+export function resolveExistingBranchTarget(input: {
+  refs: ReadonlyArray<VcsRef>;
+  branch: string;
+  projectCwd: string;
+}): ExistingBranchTarget | null {
+  const local = input.refs.find((ref) => !ref.isRemote && ref.name === input.branch);
+  if (local !== undefined) {
+    if (local.worktreePath === null) return { kind: "branch" };
+    return normalizeProjectPathForComparison(local.worktreePath) ===
+      normalizeProjectPathForComparison(input.projectCwd)
+      ? { kind: "project-folder" }
+      : { kind: "worktree", worktreePath: local.worktreePath };
+  }
+  const remote = input.refs.find(
+    (ref) => ref.isRemote && deriveLocalBranchNameFromRemoteRef(ref.name) === input.branch,
+  );
+  return remote === undefined ? null : { kind: "remote", remoteRef: remote.name };
 }
 
 export function countBusyThreadsOnCheckout(input: {

@@ -211,6 +211,10 @@ export function BranchToolbarBranchSelector({
       branch,
       worktreePath,
       envMode: nextDraftEnvMode,
+      // Opening an existing branch stores it as its own base; another base starts a new branch.
+      ...(draftThread?.newWorktreeBranch === draftThread?.branch && branch !== draftThread?.branch
+        ? { newWorktreeBranch: null }
+        : {}),
       environmentSelection: automatic ? (draftThread?.environmentSelection ?? "auto") : "manual",
       projectRef: scopeProjectRef(environmentId, activeProject.id),
     });
