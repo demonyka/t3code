@@ -4923,8 +4923,54 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     );
     const bases = parseBranchBases(configuredBases.exitCode === 0 ? configuredBases.stdout : "");
     const compared = new Set(input.compareWorktreePaths);
+    const entries = parseWorktreeEntries(listing.stdout);
+    const mainBranch = entries.find((entry) => entry.isMain)?.refName ?? null;
+    const remoteName =
+      compared.size === 0
+        ? null
+        : yield* resolvePrimaryRemoteName(input.cwd).pipe(Effect.orElseSucceed(() => null));
+    const defaultBranch =
+      (remoteName === null
+        ? null
+        : yield* resolveDefaultBranchName(input.cwd, remoteName).pipe(
+            Effect.orElseSucceed(() => null),
+          )) ?? mainBranch;
+    const mergeTargets =
+      defaultBranch === null
+        ? []
+        : [
+            `refs/heads/${defaultBranch}`,
+            ...(remoteName === null ? [] : [`refs/remotes/${remoteName}/${defaultBranch}`]),
+          ];
+    // A branch with no commits of its own is trivially inside the default branch, so it only
+    // counts as merged once its tip moved past the commit it was created at.
+    const resolveMergedInto = Effect.fn("listWorktrees.resolveMergedInto")(function* (
+      cwd: string,
+      branch: string,
+    ) {
+      if (defaultBranch === null || branch === defaultBranch) return null;
+      const reflog = yield* executeGit(
+        "GitVcsDriver.listWorktrees.reflog",
+        cwd,
+        ["reflog", "show", "--format=%H", `refs/heads/${branch}`, "--"],
+        { allowNonZeroExit: true, timeoutMs: 5_000 },
+      );
+      const shas = reflog.exitCode === 0 ? reflog.stdout.split("\n").filter(Boolean) : [];
+      const tip = shas[0];
+      if (tip === undefined || tip === shas.at(-1)) return null;
+      for (const target of mergeTargets) {
+        const ancestor = yield* executeGit(
+          "GitVcsDriver.listWorktrees.merged",
+          cwd,
+          ["merge-base", "--is-ancestor", tip, target],
+          { allowNonZeroExit: true, timeoutMs: 5_000 },
+        );
+        if (ancestor.exitCode === 0) return defaultBranch;
+      }
+      return null;
+    });
     const worktrees = yield* Effect.forEach(
-      parseWorktreeEntries(listing.stdout),
+      entries,
       (entry) =>
         Effect.gen(function* () {
           const baseRefName =
@@ -4949,11 +4995,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
                   ),
                 )
               : null;
+          const mergedInto =
+            !entry.isMain && entry.refName !== null && compared.has(entry.path)
+              ? yield* resolveMergedInto(input.cwd, entry.refName)
+              : null;
           return {
             ...entry,
             baseRefName,
             behindBase: counts === null ? null : Number(counts[1]),
             aheadOfBase: counts === null ? null : Number(counts[2]),
+            mergedInto,
           };
         }),
       { concurrency: 4 },

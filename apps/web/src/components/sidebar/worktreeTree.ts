@@ -10,6 +10,13 @@ type TreeThread = {
   readonly worktreePath: string | null;
   readonly branch: string | null;
   readonly createdAt: string;
+  readonly pullRequests?: ReadonlyArray<{
+    readonly snapshot: {
+      readonly state: string;
+      readonly headBranch: string;
+      readonly baseBranch: string;
+    } | null;
+  }>;
 };
 
 type TreeProject = {
@@ -30,6 +37,8 @@ export interface SidebarWorktreeNode<TThread> {
   readonly baseBranch: string | null;
   readonly aheadOfBase: number | null;
   readonly behindBase: number | null;
+  // Where the branch landed: git saw its commits there, or its pull request merged (squash too).
+  readonly mergedInto: string | null;
   readonly threads: readonly TThread[];
   readonly children: ReadonlyArray<SidebarWorktreeNode<TThread>>;
 }
@@ -98,6 +107,22 @@ function resolveBranchLabel(listed: ListedWorktree | undefined, threadBranch: st
   return liveBranch !== null && !isTemporaryWorktreeBranch(liveBranch)
     ? liveBranch
     : (threadBranch ?? liveBranch);
+}
+
+function resolveMergedInto(
+  listed: ListedWorktree | undefined,
+  branch: string | null,
+  threads: readonly TreeThread[],
+) {
+  if (listed?.mergedInto) return listed.mergedInto;
+  for (const thread of threads) {
+    for (const link of thread.pullRequests ?? []) {
+      if (link.snapshot?.state === "merged" && link.snapshot.headBranch === branch) {
+        return link.snapshot.baseBranch;
+      }
+    }
+  }
+  return null;
 }
 
 function resolveParents(
@@ -181,16 +206,18 @@ function buildSidebarWorktreeTree<TThread extends TreeThread>(input: {
   const buildNode = (path: string): SidebarWorktreeNode<TThread> => {
     const listed = listedByPath.get(path);
     const threads = threadsByPath.get(path) ?? [];
+    const branch = resolveBranchLabel(listed, threads[0]?.branch ?? null);
     return {
       key: worktreeListKey(project.environmentId, path),
       environmentId: project.environmentId,
       projectId: project.id,
       path,
-      branch: resolveBranchLabel(listed, threads[0]?.branch ?? null),
+      branch,
       checkoutLabel: null,
       baseBranch: listed?.baseRefName ?? null,
       aheadOfBase: listed?.aheadOfBase ?? null,
       behindBase: listed?.behindBase ?? null,
+      mergedInto: resolveMergedInto(listed, branch, threads),
       threads,
       children: sortNodes((childPaths.get(path) ?? []).map(buildNode)),
     };
@@ -240,6 +267,7 @@ export function buildSidebarFolderTree<TThread extends TreeThread>(input: {
         baseBranch: null,
         aheadOfBase: null,
         behindBase: null,
+        mergedInto: null,
         threads: tree.rootThreads,
         children: tree.nodes,
       },

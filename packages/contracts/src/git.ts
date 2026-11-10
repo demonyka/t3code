@@ -301,6 +301,8 @@ const VcsListedWorktree = Schema.Struct({
   baseRefName: Schema.NullOr(TrimmedNonEmptyStringSchema),
   aheadOfBase: Schema.NullOr(NonNegativeInt),
   behindBase: Schema.NullOr(NonNegativeInt),
+  // The default branch this worktree's commits already reached.
+  mergedInto: Schema.optional(Schema.NullOr(TrimmedNonEmptyStringSchema)),
 });
 
 export const VcsListWorktreesResult = Schema.Struct({

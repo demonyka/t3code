@@ -4,6 +4,7 @@ import { memo } from "react";
 
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
+import { PULL_REQUEST_STATE_PRESENTATION } from "../pullRequest/pullRequestIcons";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SidebarFolderStatusDot } from "./SidebarProjectFolderHeader";
@@ -12,6 +13,7 @@ import { sidebarWorktreeRowId, type SidebarWorktreeNode } from "./worktreeTree";
 type WorktreeNode = SidebarWorktreeNode<EnvironmentThreadShell>;
 
 const DEPTH_INDENT_PX = 12;
+const MergedIcon = PULL_REQUEST_STATE_PRESENTATION.merged.Icon;
 
 function worktreeLabel(node: WorktreeNode) {
   const name = node.branch ?? node.path.split("/").at(-1) ?? node.path;
@@ -42,7 +44,8 @@ export const SidebarWorktreeRow = memo(function SidebarWorktreeRow(props: {
   const { node, collapsed, hiddenThreads } = props;
   const rowId = sidebarWorktreeRowId(node.key);
   const label = worktreeLabel(node);
-  const drift = describeBaseDrift(node);
+  // Drift against the base stops mattering once the work landed.
+  const drift = node.mergedInto === null ? describeBaseDrift(node) : "";
   return (
     <li
       data-testid="sidebar-worktree-row"
@@ -70,6 +73,14 @@ export const SidebarWorktreeRow = memo(function SidebarWorktreeRow(props: {
         >
           {props.isDeleting ? (
             <Spinner size="sm" tone="muted" className="shrink-0" />
+          ) : node.mergedInto !== null ? (
+            <MergedIcon
+              aria-hidden
+              className={cn(
+                "size-3.5 shrink-0",
+                PULL_REQUEST_STATE_PRESENTATION.merged.toneClassName,
+              )}
+            />
           ) : (
             <GitBranchIcon
               aria-hidden
@@ -80,7 +91,12 @@ export const SidebarWorktreeRow = memo(function SidebarWorktreeRow(props: {
             {props.isDeleting ? `Deleting ${label}…` : label}
           </span>
         </TooltipTrigger>
-        <TooltipPopup>{node.path}</TooltipPopup>
+        <TooltipPopup>
+          {node.mergedInto === null ? null : (
+            <span className="block">Merged into {node.mergedInto}. Safe to delete.</span>
+          )}
+          {node.path}
+        </TooltipPopup>
       </Tooltip>
       <span className="flex shrink-0 items-center gap-1.5 ps-1.5">
         {drift === "" ? null : (

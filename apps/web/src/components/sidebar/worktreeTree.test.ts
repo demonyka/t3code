@@ -17,11 +17,27 @@ function thread(
   createdAt = "2026-01-01T00:00:00.000Z",
   branch: string | null = null,
 ) {
-  return { id, environmentId, projectId: "p1", worktreePath, branch, createdAt };
+  const pullRequests: ReadonlyArray<{
+    snapshot: { state: string; headBranch: string; baseBranch: string } | null;
+  }> = [];
+  return { id, environmentId, projectId: "p1", worktreePath, branch, createdAt, pullRequests };
 }
 
-function worktree(path: string, refName: string | null, baseRefName: string | null = "main") {
-  return { path, refName, isMain: false, baseRefName, aheadOfBase: null, behindBase: null };
+function worktree(
+  path: string,
+  refName: string | null,
+  baseRefName: string | null = "main",
+  mergedInto: string | null = null,
+) {
+  return {
+    path,
+    refName,
+    isMain: false,
+    baseRefName,
+    aheadOfBase: null,
+    behindBase: null,
+    mergedInto,
+  };
 }
 
 const main = { ...worktree("/repo", "main", null), isMain: true };
@@ -122,6 +138,36 @@ describe("buildSidebarFolderTree", () => {
       [main, worktree("/w/a", "t3code/deadbeef")],
     );
     expect(tree.nodes[0]?.branch).toBe("feat-real");
+  });
+
+  it.each([
+    [
+      "git found its commits in the default branch",
+      worktree("/w/a", "feat-a", "main", "main"),
+      [],
+      "main",
+    ],
+    [
+      "its pull request was squash-merged",
+      worktree("/w/a", "feat-a"),
+      [{ snapshot: { state: "merged", headBranch: "feat-a", baseBranch: "main" } }],
+      "main",
+    ],
+    [
+      "a merged pull request came from another branch",
+      worktree("/w/a", "feat-a"),
+      [{ snapshot: { state: "merged", headBranch: "older", baseBranch: "main" } }],
+      null,
+    ],
+    [
+      "its pull request is still open",
+      worktree("/w/a", "feat-a"),
+      [{ snapshot: { state: "open", headBranch: "feat-a", baseBranch: "main" } }],
+      null,
+    ],
+  ])("marks a worktree merged when %s", (_name, listed, pullRequests, expected) => {
+    const tree = build([{ ...thread("a1", "/w/a"), pullRequests }], [main, listed]);
+    expect(tree.nodes[0]?.mergedInto).toBe(expected);
   });
 
   it("makes another machine's checkout a node of the folder", () => {

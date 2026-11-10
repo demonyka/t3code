@@ -4413,6 +4413,48 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
   });
 
   describe("worktree operations", () => {
+    it.effect("marks a worktree merged once its own commits reach the default branch", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const worktrees = yield* makeTmpDir("git-worktrees-");
+        const create = (name: string) =>
+          driver.createWorktree({
+            cwd,
+            path: path.join(worktrees, name),
+            refName: initialBranch,
+            newRefName: `feature/${name}`,
+            baseRefName: initialBranch,
+          });
+        yield* create("fresh");
+        yield* create("merged");
+        yield* create("unmerged");
+        yield* git(path.join(worktrees, "merged"), ["commit", "--allow-empty", "-m", "done"]);
+        yield* git(path.join(worktrees, "unmerged"), ["commit", "--allow-empty", "-m", "wip"]);
+        yield* git(cwd, ["merge", "--ff-only", "feature/merged"]);
+
+        const { worktrees: listed } = yield* driver.listWorktrees({
+          cwd,
+          compareWorktreePaths: yield* Effect.forEach(["fresh", "merged", "unmerged"], (name) =>
+            fs.realPath(path.join(worktrees, name)),
+          ),
+        });
+
+        assert.deepStrictEqual(
+          Object.fromEntries(listed.map((entry) => [entry.refName, entry.mergedInto ?? null])),
+          {
+            [initialBranch]: null,
+            "feature/fresh": null,
+            "feature/merged": initialBranch,
+            "feature/unmerged": null,
+          },
+        );
+      }).pipe(Effect.provide(layerTest)),
+    );
+
     it.effect("lists worktrees with their base and how far each drifted from it", () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;

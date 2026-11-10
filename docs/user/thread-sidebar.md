@@ -160,7 +160,8 @@ its folder and archive its chats. The branch stays, and restoring a chat recreat
 next turn.
 
 An arrow with a number on the top row means new commits are waiting on the remote; click it to pull.
-On a worktree, `↓` counts commits its base branch has that it does not. T3 Code checks for updates in
+On a worktree, `↓` counts commits its base branch has that it does not, and a merge icon means
+its work already reached the default branch, through a merge or a merged pull request. T3 Code checks for updates in
 the background, and the **Automatically pull** setting can apply them for you. Turn off
 **Settings → Labs → Boring sidebar (group by project)** for one flat list.
 
